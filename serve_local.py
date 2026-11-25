@@ -3,13 +3,14 @@
 
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import argparse
 import json
 import os
 import posixpath
 from urllib.parse import urlsplit
 from urllib.parse import unquote
 
-from tools.local_site import prepare_html
+from tools.local_site import prepare_html, shopify_image_variant
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 ROOT = PROJECT_ROOT / "site"
@@ -60,7 +61,16 @@ class KaoriHandler(SimpleHTTPRequestHandler):
             "/local-mode.js": "local-mode.js",
             "/storefront-config.js": "storefront-config.js",
         }
-        request_path = urlsplit(self.path).path
+        request = urlsplit(self.path)
+        request_path = request.path
+        variant = shopify_image_variant(unquote(request_path), request.query)
+        if variant and (ROOT / variant.lstrip("/")).is_file():
+            self.path = variant
+            try:
+                super().do_GET()
+            finally:
+                self.path = request.geturl()
+            return
         redirect = self.redirects.get(request_path)
         if redirect:
             self.send_response(302)
@@ -111,7 +121,11 @@ class KaoriHandler(SimpleHTTPRequestHandler):
         self.send_error(404)
 
 
-os.chdir(ROOT)
-print("Kaori local: http://127.0.0.1:8000")
-print("Pressione Ctrl+C para parar.")
-ThreadingHTTPServer(("127.0.0.1", 8000), KaoriHandler).serve_forever()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8000)
+    port = parser.parse_args().port
+    os.chdir(ROOT)
+    print(f"Kaori local: http://127.0.0.1:{port}")
+    print("Pressione Ctrl+C para parar.")
+    ThreadingHTTPServer(("127.0.0.1", port), KaoriHandler).serve_forever()

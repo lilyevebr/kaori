@@ -1,8 +1,5 @@
-// Local storefront behavior and project-specific visual overrides.
+// Storefront behavior for the static mirror and local preview.
 (() => {
-  const isLocal = location.hostname === '127.0.0.1' || location.hostname === 'localhost';
-  if (!isLocal) return;
-
   const config = Object.assign({ checkoutUrl: '' }, window.KAORI_STOREFRONT_CONFIG || {});
   const unavailableRoutes = new Map([
     ['/apps/parcelpanel', 'Order tracking will be connected with the order system.'],
@@ -165,7 +162,7 @@
   }
 
   async function installLocalSearch() {
-    if (location.pathname !== '/search') return;
+    if (location.pathname.replace(/\/$/, '') !== '/search') return;
     const query = new URLSearchParams(location.search).get('q')?.trim() || '';
     document.querySelectorAll('input[name="q"]').forEach((input) => {
       input.value = query;
@@ -232,6 +229,14 @@
     repairLocalAssetUrls();
     installLocalGuards();
     installLocalSearch();
+    const feature = new URLSearchParams(location.search).get('feature');
+    const featureMessages = {
+      checkout: 'Checkout is currently unavailable.',
+      'order-tracking': unavailableRoutes.get('/apps/parcelpanel'),
+      'customer-account': unavailableRoutes.get('/customer_authentication/redirect'),
+      'subscription-management': unavailableRoutes.get('/a/loop_subscriptions/customer'),
+    };
+    if (Object.hasOwn(featureMessages, feature)) showNotice(featureMessages[feature]);
 
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {

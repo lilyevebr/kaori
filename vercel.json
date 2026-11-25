@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "python3 -m tools.build_static",
+  "outputDirectory": "dist",
+  "cleanUrls": true,
+  "redirects": [
+    {
+      "source": "/products/deodorizing-persimmon-soap1",
+      "destination": "/products/deodorizing-persimmon-soap",
+      "permanent": true
+    },
+    { "source": "/cart", "destination": "/?feature=checkout", "permanent": false },
+    { "source": "/apps/parcelpanel", "destination": "/?feature=order-tracking", "permanent": false },
+    { "source": "/customer_authentication/redirect", "destination": "/?feature=customer-account", "permanent": false },
+    { "source": "/a/loop_subscriptions/customer", "destination": "/?feature=subscription-management", "permanent": false }
+  ]
+}

@@ -7,7 +7,10 @@ analytics, and checkout bootstraps do not make dead network requests.
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import PurePosixPath
 import re
+from urllib.parse import parse_qsl, urlencode
 
 
 SCRIPT_SRC_MARKERS = (
@@ -52,6 +55,25 @@ LINK_MARKERS = (
 
 SCRIPT_RE = re.compile(r"<script\b[^>]*>.*?</script\s*>", re.I | re.S)
 LINK_RE = re.compile(r"<link\b[^>]*>", re.I | re.S)
+PIXEL_IFRAME_RE = re.compile(
+    r"<iframe\b[^>]*\bsrc=['\"][^'\"]*/web-pixels@[^'\"]*['\"][^>]*>\s*</iframe\s*>",
+    re.I,
+)
+
+
+def shopify_image_variant(path: str, query: str) -> str | None:
+    """Give resized Shopify images their own file in the offline mirror."""
+    if not path.startswith(("/cdn/shop/files/", "/_external/cdn.shopify.com/s/files/")):
+        return None
+    suffix = PurePosixPath(path).suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif", ".svg"}:
+        return None
+    parameters = parse_qsl(query)
+    if not any(key in {"width", "height", "crop"} for key, _ in parameters):
+        return None
+    variant_key = f"{path}?{urlencode(sorted(parameters))}"
+    digest = hashlib.sha256(variant_key.encode("utf-8")).hexdigest()[:24]
+    return f"/_image-variants/{digest}{suffix}"
 
 
 def _keep_script(match: re.Match[str]) -> str:
@@ -77,6 +99,7 @@ def prepare_html(text: str) -> str:
 
     text = SCRIPT_RE.sub(_keep_script, text)
     text = LINK_RE.sub(_keep_link, text)
+    text = PIXEL_IFRAME_RE.sub("", text)
 
     # Keep every first-party image and navigation request inside the local mirror.
     for origin in (

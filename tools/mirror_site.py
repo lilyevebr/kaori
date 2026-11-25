@@ -24,10 +24,10 @@ import sys
 import time
 from typing import Iterable
 from urllib.error import HTTPError, URLError
-from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
-from local_site import prepare_html
+from local_site import prepare_html, shopify_image_variant
 
 
 ORIGIN = "https://try-kaori.com"
@@ -129,6 +129,9 @@ def asset_path(url: str) -> Path:
         parts.append("index")
     if p.hostname not in (HOST, f"www.{HOST}"):
         parts = ["_external", safe_segment(p.netloc)] + parts
+    variant = shopify_image_variant("/" + "/".join(parts), p.query)
+    if variant:
+        return OUT / variant.lstrip("/")
     return OUT.joinpath(*parts)
 
 
@@ -252,6 +255,8 @@ def download_one(url: str) -> tuple[str, bool, str, set[str]]:
     nested: set[str] = set()
     try:
         data, content_type = request_bytes(url)
+        if target.parent.name == "_image-variants" and not content_type.startswith("image/"):
+            return url, False, f"unexpected media type: {content_type}", nested
         target.parent.mkdir(parents=True, exist_ok=True)
         if content_type == "text/css" or target.suffix.lower() == ".css":
             text = data.decode("utf-8", "replace")
@@ -290,10 +295,47 @@ def write_local_support() -> None:
     shutil.copyfile(ROOT / "overrides" / "local-mode.js", OUT / "local-mode.js")
 
 
+def repair_images() -> int:
+    """Restore image variants discarded by earlier versions of the mirror."""
+    manifest = json.loads((ROOT / "backup-manifest.json").read_text(encoding="utf-8"))
+    files: dict[Path, str] = {}
+    for item in manifest["assets"]:
+        url = item["url"]
+        target = asset_path(url)
+        if target.parent.name != "_image-variants":
+            continue
+        files[target] = url
+        # Older pages also reference the shared filename without a size query.
+        # Keep the source image at that path for those references.
+        image = urlsplit(url)
+        parameters = [(key, value) for key, value in parse_qsl(image.query) if key == "v"]
+        original = image._replace(query=urlencode(parameters)).geturl()
+        files[asset_path(original)] = original
+
+    pending = [
+        url for path, url in files.items()
+        if path.parent.name != "_image-variants" or not path.is_file()
+    ]
+    log(f"Restaurando {len(pending)} arquivos de imagem de {len(files)} identificados...")
+    failures = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        for count, (url, ok, detail, _) in enumerate(pool.map(download_one, pending), 1):
+            if not ok:
+                failures += 1
+                log(f"  falha: {url} ({detail})")
+            if count % 100 == 0 or count == len(pending):
+                log(f"  {count}/{len(pending)} processados")
+    log(f"Concluído: {len(pending) - failures} arquivos restaurados, {failures} falhas.")
+    return int(bool(failures))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-pages", type=int, default=120)
+    parser.add_argument("--repair-images", action="store_true")
     args = parser.parse_args()
+    if args.repair_images:
+        return repair_images()
     if not CHROME.exists():
         raise SystemExit(f"Chrome não encontrado em {CHROME}")
     OUT.mkdir(parents=True, exist_ok=True)
